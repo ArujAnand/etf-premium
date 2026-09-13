@@ -1,0 +1,6 @@
+{
+  "name": "ETF Premium Analyzer",
+  "description": "Historical premium and discount analyzer for Indian ETFs with NSE closing price vs official EOD NAV, exact dates, and rolling statistics",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
