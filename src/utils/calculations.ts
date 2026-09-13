@@ -1,20 +1,42 @@
+/**
+ * Daily market and valuation record for an ETF session.
+ */
 export interface ETFRecord {
-  date: string; // 'YYYY-MM-DD'
+  /** ISO-8601 calendar date of the trading session (YYYY-MM-DD). */
+  date: string;
+  /** NSE closing trade price in INR. */
   close: number;
+  /** Official AMFI end-of-day Net Asset Value in INR. */
   nav: number;
+  /** Day opening price in INR, or null if unrecorded. */
   open: number | null;
+  /** Day intraday high in INR, or null if unrecorded. */
   high: number | null;
+  /** Day intraday low in INR, or null if unrecorded. */
   low: number | null;
+  /** Number of units traded on the exchange during the session. */
   volume: number;
+  /** Total traded turnover value in INR. */
   traded_value: number;
+  /**
+   * Premium or discount percentage relative to official EOD NAV.
+   * Formula: ((close / nav) - 1) * 100
+   */
   premium_pct: number;
+  /** 30-day rolling simple moving average of premium percentage. */
   premium_ma_30d?: number | null;
+  /** 90-day rolling simple moving average of premium percentage. */
   premium_ma_90d?: number | null;
+  /** 180-day rolling simple moving average of premium percentage. */
   premium_ma_180d?: number | null;
+  /** 365-day rolling simple moving average of premium percentage. */
   premium_ma_365d?: number | null;
   [key: string]: any;
 }
 
+/**
+ * Metadata and time-series history for an ETF instrument.
+ */
 export interface ETFMeta {
   symbol: string;
   name: string;
@@ -37,6 +59,10 @@ export const STAT_PERIODS: Record<string, number | null> = {
   "Since Inception": null,
 };
 
+/**
+ * Formats an ISO-8601 date string ('YYYY-MM-DD') into standard UK long format (e.g. '11 Sep 2026').
+ * Uses UTC timezone to prevent local clock skew from shifting the displayed date.
+ */
 export function formatExactDate(isoDateStr: string): string {
   if (!isoDateStr) return '';
   const [year, month, day] = isoDateStr.split('-').map(Number);
@@ -47,9 +73,12 @@ export function formatExactDate(isoDateStr: string): string {
     month: 'short',
     year: 'numeric',
     timeZone: 'UTC'
-  }); // e.g. "11 Sep 2026"
+  });
 }
 
+/**
+ * Formats an ISO-8601 date string into compact short format (e.g. '11 Sep 26').
+ */
 export function formatShortDate(isoDateStr: string): string {
   if (!isoDateStr) return '';
   const [year, month, day] = isoDateStr.split('-').map(Number);
@@ -60,9 +89,17 @@ export function formatShortDate(isoDateStr: string): string {
     month: 'short',
     year: '2-digit',
     timeZone: 'UTC'
-  }); // e.g. "11 Sep 26"
+  });
 }
 
+/**
+ * Computes trailing simple moving averages of premium_pct over specified windows.
+ * Requires at least ceil(w / 3) valid observations to populate an MA; otherwise outputs null.
+ *
+ * @param records Time-series records.
+ * @param windows Trailing window lengths in observation counts (default: [30, 90, 180, 365]).
+ * @returns Cloned records enriched with premium_ma_{w}d fields.
+ */
 export function addRollingAverages(records: ETFRecord[], windows: number[] = ROLLING_WINDOWS): ETFRecord[] {
   const sorted = [...records].sort((a, b) => a.date.localeCompare(b.date));
   
@@ -82,6 +119,14 @@ export function addRollingAverages(records: ETFRecord[], windows: number[] = ROL
   });
 }
 
+/**
+ * Computes the empirical percentile rank of a value within a distribution.
+ * Defined as (count of observations <= currentVal) / total observations * 100.
+ *
+ * @param currentVal Value to rank.
+ * @param historicalVals Array of distribution values.
+ * @returns Percentile rank between 0 and 100, or null if empty.
+ */
 export function percentileRank(currentVal: number, historicalVals: number[]): number | null {
   const clean = historicalVals.filter(v => typeof v === 'number' && !isNaN(v));
   if (clean.length === 0) return null;
@@ -89,6 +134,13 @@ export function percentileRank(currentVal: number, historicalVals: number[]): nu
   return (count / clean.length) * 100;
 }
 
+/**
+ * Computes value at arbitrary percentiles using linear interpolation.
+ *
+ * @param values Numerical values.
+ * @param percentiles Array of target percentiles (0-100).
+ * @returns Key-value map of percentile to interpolated value.
+ */
 export function valueAtPercentiles(values: number[], percentiles: number[] = [5, 25, 50, 75, 95]): Record<number, number | null> {
   const clean = values.filter(v => typeof v === 'number' && !isNaN(v)).sort((a, b) => a - b);
   const res: Record<number, number | null> = {};
@@ -110,6 +162,13 @@ export function valueAtPercentiles(values: number[], percentiles: number[] = [5,
   return res;
 }
 
+/**
+ * Computes the percentage of historical sessions trading at a discount or exceeding given premium thresholds.
+ *
+ * @param values Numerical premium values.
+ * @param thresholds Cutoff values (e.g. [0, 5, 10, 15, 20, 25, 30]).
+ * @returns Map containing 'discount' frequency and frequency for each threshold string.
+ */
 export function thresholdFrequencies(values: number[], thresholds: number[] = PREMIUM_THRESHOLDS): Record<string, number | null> {
   const clean = values.filter(v => typeof v === 'number' && !isNaN(v));
   if (clean.length === 0) {
@@ -128,6 +187,9 @@ export function thresholdFrequencies(values: number[], thresholds: number[] = PR
   return res;
 }
 
+/**
+ * Filters records within a trailing calendar day window relative to the latest available record date.
+ */
 function slicePeriod(records: ETFRecord[], days: number | null): ETFRecord[] {
   if (days === null || records.length === 0) return records;
   const latestDate = new Date(records[records.length - 1].date);
@@ -135,6 +197,9 @@ function slicePeriod(records: ETFRecord[], days: number | null): ETFRecord[] {
   return records.filter(r => new Date(r.date).getTime() > cutoffTime);
 }
 
+/**
+ * Statistical metrics for a defined historical lookback period.
+ */
 export interface PeriodStat {
   label: string;
   avg: number | null;
@@ -149,6 +214,14 @@ export interface PeriodStat {
   n: number | null;
 }
 
+/**
+ * Computes summary statistics (mean, median, min, max, std, percentiles) across defined lookback windows.
+ * Periods exceeding available fund history length return null fields.
+ *
+ * @param records Time-series records.
+ * @param inceptionDateStr Fund inception date ('YYYY-MM-DD').
+ * @returns Array of PeriodStat objects for 1M, 3M, 6M, 1Y, 3Y, 5Y, and Inception.
+ */
 export function computePeriodStatistics(records: ETFRecord[], inceptionDateStr: string): PeriodStat[] {
   if (records.length === 0) return [];
   const latestDate = new Date(records[records.length - 1].date);
@@ -233,6 +306,13 @@ export function computePeriodStatistics(records: ETFRecord[], inceptionDateStr: 
   return results;
 }
 
+/**
+ * Computes current premium percentile ranks against multiple historical lookback windows.
+ *
+ * @param records Time-series records.
+ * @param currentPremium Latest premium percentage.
+ * @returns Map of window labels ('Since Inception', '3Y', '1Y', '6M') to percentile rank.
+ */
 export function computeCurrentPercentileByPeriod(records: ETFRecord[], currentPremium: number): Record<string, number | null> {
   const lookbacks: Record<string, number | null> = {
     "Since Inception": null,

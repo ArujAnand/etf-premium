@@ -35,14 +35,23 @@ import {
   Sliders,
   ChevronRight,
   Filter,
-  Sparkles
+  Sparkles,
+  RefreshCw,
+  CheckCircle2
 } from 'lucide-react';
 import { AIAdvisor } from './components/AIAdvisor';
 
-const etfDataset = rawData as unknown as Record<string, ETFMeta>;
-const availableSymbols = Object.keys(etfDataset);
+const initialDataset = rawData as unknown as Record<string, ETFMeta>;
+const availableSymbols = Object.keys(initialDataset);
 
+/**
+ * Root application component for the ETF Premium/Discount Analyzer.
+ * Coordinates time-series visualization, statistical distributions,
+ * interactive rolling moving average filters, live data synchronization,
+ * and navigation across Single ETF, AI Advisor, and ETF Comparison modes.
+ */
 export default function App() {
+  const [etfDataset, setEtfDataset] = useState<Record<string, ETFMeta>>(initialDataset);
   const [selectedSymbol, setSelectedSymbol] = useState<string>(availableSymbols[0] || 'MAFANG');
   const [viewMode, setViewMode] = useState<'single' | 'advisor' | 'comparison'>('single');
   const [timeRange, setTimeRange] = useState<string>('ALL');
@@ -50,7 +59,51 @@ export default function App() {
   const [searchDate, setSearchDate] = useState<string>('');
   const [tableSortAsc, setTableSortAsc] = useState<boolean>(false);
   const [tablePage, setTablePage] = useState<number>(1);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const rowsPerPage = 15;
+
+  // Auto-sync or manual sync trigger
+  const handleSyncData = async () => {
+    setIsSyncing(true);
+    setSyncNotice(null);
+    try {
+      const res = await fetch('/api/sync-data');
+      const data = await res.json();
+      if (data.status === 'ok' && data.etfs) {
+        setEtfDataset((prev) => {
+          const updated = { ...prev };
+          for (const sym of Object.keys(data.etfs)) {
+            const etfInfo = data.etfs[sym];
+            if (etfInfo?.records?.length && updated[sym]) {
+              // Merge newly fetched recent records with existing historical data
+              const existingMap = new Map(updated[sym].history.map(r => [r.date, r]));
+              for (const nr of etfInfo.records) {
+                existingMap.set(nr.date, { ...existingMap.get(nr.date), ...nr });
+              }
+              const mergedHistory = Array.from(existingMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+              updated[sym] = {
+                ...updated[sym],
+                history: mergedHistory,
+              };
+            }
+          }
+          return updated;
+        });
+        const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setLastSyncTime(nowStr);
+        setSyncNotice('Live data synced successfully from NSE & AMFI');
+        setTimeout(() => setSyncNotice(null), 4000);
+      }
+    } catch (e: any) {
+      console.error('Data sync failed:', e);
+      setSyncNotice('Sync failed. Using verified offline dataset.');
+      setTimeout(() => setSyncNotice(null), 4000);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const currentEtf = etfDataset[selectedSymbol];
 
@@ -287,8 +340,37 @@ export default function App() {
                 </select>
               </div>
             )}
+
+            {/* Live Data Sync Button */}
+            <button
+              id="btn-sync-live-data"
+              onClick={handleSyncData}
+              disabled={isSyncing}
+              title="Sync latest prices from Yahoo Finance (NSE) and official NAVs from AMFI (mfapi.in)"
+              className={`px-3 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                isSyncing
+                  ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-wait'
+                  : 'bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border-slate-200 shadow-2xs'
+              }`}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-blue-600' : 'text-slate-500'}`} />
+              <span className="hidden sm:inline">{isSyncing ? 'Syncing...' : 'Sync Live'}</span>
+              {lastSyncTime && (
+                <span className="text-[10px] text-emerald-600 font-mono hidden md:inline">
+                  • {lastSyncTime}
+                </span>
+              )}
+            </button>
           </div>
         </div>
+
+        {/* Sync notification banner */}
+        {syncNotice && (
+          <div className="bg-emerald-50 border-t border-emerald-200 px-4 py-1.5 text-center text-xs font-medium text-emerald-800 flex items-center justify-center gap-1.5 transition-all">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+            <span>{syncNotice}</span>
+          </div>
+        )}
       </header>
 
       {/* Main Content Area */}
